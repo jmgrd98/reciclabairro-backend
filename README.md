@@ -164,12 +164,45 @@ npm run test:e2e
 - **Unitários** (`npm test`): máquina de estados (todas as combinações de status × ator), cálculo de atraso, datas com fuso, associação de endereço à região, mensagens de notificação.
 - **E2E** (`npm run test:e2e`): a jornada completa do documento contra um PostgreSQL/PostGIS real — banco `reciclabairro_test`, criado pelo `docker compose` e esvaziado a cada execução. O setup se recusa a rodar em um banco sem "test" no nome.
 
-## Deploy
+## Produção
 
-- `Dockerfile` multi-stage: a imagem aplica as migrations e sobe a API.
-- `.github/workflows/ci.yml`: lint, tipos, testes unitários, build e e2e a cada push/PR.
-- `render.yaml`: blueprint para o plano gratuito do Render. O banco precisa de **PostGIS** (por exemplo, Neon: `CREATE EXTENSION postgis` é executado pela migration). **Ainda não foi testado em um deploy real** — confirme na hora se os planos gratuitos continuam oferecendo PostGIS.
-- Em produção, defina `JWT_ACCESS_SECRET` forte, `CORS_ORIGINS` com os domínios do front e as variáveis `SMTP_*`.
+A API está publicada na **Vercel** (função serverless em São Paulo, `gru1`) com o banco no **Neon** (PostgreSQL 17 + PostGIS, também em São Paulo), criado pela integração da Vercel.
+
+- **Endereço:** https://reciclabairro-api.vercel.app (documentação em `/docs`)
+- **Deploy:** automático a cada push na `main` (projeto `reciclabairro-api` ligado a este repositório).
+- **Como roda:** `api/index.mjs` repassa as requisições para a aplicação Nest já compilada por `npm run build` (`src/serverless.ts`). A Vercel não compila o TypeScript: assim os metadados dos decorators, de que a injeção de dependências do Nest precisa, ficam intactos.
+- **E-mails:** com `NOTIFICATION_DISPATCH=immediate`, cada aviso sai logo após a ação que o gerou (`waitUntil`). Uma rotina diária (Vercel Cron, `vercel.json`) reenvia o que tiver falhado; no plano gratuito a Vercel só permite rotinas uma vez por dia.
+- **Limite de requisições:** em memória, por instância (`src/common/rate-limit.ts`). Na Vercel cada instância conta à parte, então funciona como proteção contra abuso, não como cota exata.
+
+### Variáveis de ambiente (projeto `reciclabairro-api` na Vercel)
+
+| Variável | Valor |
+|---|---|
+| `DATABASE_URL`, `DATABASE_URL_UNPOOLED` | Criadas pela integração do Neon (conexão com pool e direta) |
+| `JWT_ACCESS_SECRET`, `CRON_SECRET` | Segredos aleatórios |
+| `BFF_SHARED_SECRET` | Mesmo valor do projeto do frontend |
+| `APP_PUBLIC_URL`, `CORS_ORIGINS` | `https://reciclabairro-web.vercel.app` |
+| `NOTIFICATION_DISPATCH` | `immediate` |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `MAIL_FROM` | Provedor de e-mail |
+
+### Migrations e seed no banco de produção
+
+As migrations **não** rodam no deploy. Depois de criar uma migration nova:
+
+```bash
+vercel env pull .env.local --environment=production
+```
+
+```bash
+DATABASE_URL="$(grep '^DATABASE_URL_UNPOOLED=' .env.local | cut -d= -f2- | tr -d '"')" npx prisma migrate deploy
+```
+
+Use sempre a conexão **direta** (`DATABASE_URL_UNPOOLED`) para migrations; a com pool é para a aplicação.
+
+### Outras formas de rodar
+
+- `Dockerfile` multi-stage: imagem que aplica as migrations e sobe a API num servidor comum (aí o modo de e-mail padrão, `interval`, já serve).
+- `.github/workflows/ci.yml`: lint, tipos, testes unitários, build e e2e a cada push.
 
 ## Próximas fases (fora da V1)
 
