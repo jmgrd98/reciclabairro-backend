@@ -914,6 +914,50 @@ describe('acompanhamento, notificações e indicadores', () => {
     expect(await app.get(NotificationsService).dispatchPending()).toBe(0);
   });
 
+  it('dois envios simultâneos da fila não mandam o mesmo e-mail duas vezes', async () => {
+    const notifications = app.get(NotificationsService);
+    const recipient = await prisma.user.findUniqueOrThrow({
+      where: { email: 'juliana@teste.local' },
+    });
+    await notifications.notify([
+      {
+        userIds: [recipient.id],
+        type: 'TESTE',
+        title: 'Aviso de teste',
+        body: 'Corpo',
+        email: true,
+        data: {},
+      },
+    ]);
+    sentMails.length = 0;
+    const queued = await prisma.notificationDelivery.findMany({
+      where: { status: 'PENDENTE', channel: 'EMAIL' },
+      select: { id: true },
+    });
+    expect(queued).toHaveLength(1);
+    const ids = queued.map((item) => item.id);
+    // Imediato (por id) e periódico (geral) ao mesmo tempo.
+    const [a, b] = await Promise.all([
+      notifications.dispatchPending(50, ids),
+      notifications.dispatchPending(50, ids),
+    ]);
+    expect(a + b).toBe(1);
+    expect(sentMails).toHaveLength(1);
+  });
+
+  it('rota do cron exige o segredo e esvazia a fila', async () => {
+    await api().get('/api/v1/internal/cron/dispatch-notifications').expect(401);
+    await api()
+      .get('/api/v1/internal/cron/dispatch-notifications')
+      .set('Authorization', 'Bearer errado')
+      .expect(401);
+    const response = await api()
+      .get('/api/v1/internal/cron/dispatch-notifications')
+      .set('Authorization', 'Bearer segredo-do-cron-para-o-e2e')
+      .expect(200);
+    expect(response.body).toEqual({ ok: true, sent: 0 });
+  });
+
   it('indicadores da cooperativa refletem o atendimento', async () => {
     const response = await api()
       .get('/api/v1/cooperative/dashboard')

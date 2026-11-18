@@ -10,3 +10,6 @@ coverage
 
 # Cliente Prisma gerado
 /src/generated/prisma
+.vercel
+.env*
+!.env.example

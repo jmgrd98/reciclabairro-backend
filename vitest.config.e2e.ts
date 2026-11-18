@@ -24,6 +24,7 @@ export default defineConfig({
       PUSH_ENABLED: 'false',
       // Sem tolerância: o teste de reuso de refresh token espera o comportamento estrito.
       REFRESH_REUSE_GRACE_SECONDS: '0',
+      CRON_SECRET: 'segredo-do-cron-para-o-e2e',
     },
   },
 });

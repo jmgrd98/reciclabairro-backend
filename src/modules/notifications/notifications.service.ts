@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { Interval } from '@nestjs/schedule';
 import { AppException } from '../../common/app.exception.js';
+import { runAfterResponse } from '../../common/background.js';
 import {
   type PaginationQuery,
   skipTake,
@@ -23,6 +24,7 @@ const MAX_ATTEMPTS = 5;
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
   private readonly isTest: boolean;
+  private readonly immediate: boolean;
   private dispatching = false;
 
   constructor(
@@ -32,13 +34,17 @@ export class NotificationsService {
     config: ConfigService,
   ) {
     this.isTest = config.get<string>('NODE_ENV') === 'test';
+    this.immediate =
+      config.get<string>('NOTIFICATION_DISPATCH') === 'immediate';
   }
 
   /**
    * Grava a notificação (já disponível no app) e enfileira os envios externos
-   * (e-mail e push), que são processados depois por dispatchPending().
+   * (e-mail e push). No modo "immediate", eles saem logo após a resposta;
+   * no modo "interval", o job agendado cuida deles.
    */
   async notify(messages: OutgoingNotification[]): Promise<void> {
+    const queued: string[] = [];
     for (const message of messages) {
       const users = await this.prisma.user.findMany({
         where: { id: { in: message.userIds }, active: true },
@@ -59,7 +65,7 @@ export class NotificationsService {
         if (this.push.enabled && user._count.deviceTokens > 0) {
           deliveries.push({ channel: NotificationChannel.PUSH });
         }
-        await this.prisma.notification.create({
+        const created = await this.prisma.notification.create({
           data: {
             userId: user.id,
             type: message.type,
@@ -68,25 +74,43 @@ export class NotificationsService {
             data: message.data,
             deliveries: { create: deliveries },
           },
+          include: {
+            deliveries: {
+              where: { status: DeliveryStatus.PENDENTE },
+              select: { id: true },
+            },
+          },
         });
+        queued.push(...created.deliveries.map((delivery) => delivery.id));
       }
+    }
+    if (this.immediate && queued.length > 0) {
+      runAfterResponse('Envio de avisos', this.dispatchPending(50, queued));
     }
   }
 
   @Interval(15_000)
   async tick(): Promise<void> {
-    if (this.isTest) return;
+    if (this.isTest || this.immediate) return;
     await this.dispatchPending();
   }
 
-  /** Envia e-mails e pushes pendentes; devolve quantos foram enviados. */
-  async dispatchPending(limit = 50): Promise<number> {
-    if (this.dispatching) return 0;
-    this.dispatching = true;
+  /**
+   * Envia e-mails e pushes pendentes (todos, ou só os `ids` informados) e
+   * devolve quantos foram enviados. Cada envio é "reservado" no banco antes de
+   * sair, para que duas execuções simultâneas (duas instâncias serverless, ou
+   * o envio imediato e a rotina diária) nunca mandem o mesmo aviso duas vezes.
+   */
+  async dispatchPending(limit = 50, ids?: string[]): Promise<number> {
+    // A trava em memória vale para o job periódico; envios imediatos de
+    // requisições diferentes podem rodar juntos (a reserva no banco os separa).
+    if (!ids && this.dispatching) return 0;
+    if (!ids) this.dispatching = true;
     let sent = 0;
     try {
       const pending = await this.prisma.notificationDelivery.findMany({
         where: {
+          ...(ids ? { id: { in: ids } } : {}),
           status: DeliveryStatus.PENDENTE,
           attempts: { lt: MAX_ATTEMPTS },
           channel: {
@@ -113,6 +137,16 @@ export class NotificationsService {
 
       for (const delivery of pending) {
         const { notification } = delivery;
+        const claimed = await this.prisma.notificationDelivery.updateMany({
+          where: {
+            id: delivery.id,
+            status: DeliveryStatus.PENDENTE,
+            attempts: delivery.attempts,
+          },
+          data: { attempts: { increment: 1 } },
+        });
+        if (claimed.count === 0) continue;
+        const attempts = delivery.attempts + 1;
         try {
           if (notification.user.active) {
             if (delivery.channel === NotificationChannel.EMAIL) {
@@ -134,19 +168,13 @@ export class NotificationsService {
           }
           await this.prisma.notificationDelivery.update({
             where: { id: delivery.id },
-            data: {
-              status: DeliveryStatus.ENVIADA,
-              sentAt: new Date(),
-              attempts: { increment: 1 },
-            },
+            data: { status: DeliveryStatus.ENVIADA, sentAt: new Date() },
           });
           sent += 1;
         } catch (error) {
-          const attempts = delivery.attempts + 1;
           await this.prisma.notificationDelivery.update({
             where: { id: delivery.id },
             data: {
-              attempts,
               lastError: String(error).slice(0, 500),
               status:
                 attempts >= MAX_ATTEMPTS
@@ -160,7 +188,7 @@ export class NotificationsService {
         }
       }
     } finally {
-      this.dispatching = false;
+      if (!ids) this.dispatching = false;
     }
     return sent;
   }

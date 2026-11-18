@@ -45,6 +45,16 @@ export const envSchema = z.object({
   PUSH_ENABLED: booleanFromString.default(false),
 
   LATE_TRIAGE_HOURS: z.coerce.number().positive().default(48),
+
+  /**
+   * Como e-mails e pushes saem:
+   * - "interval": um job a cada 15 s envia a fila (servidor sempre ligado);
+   * - "immediate": cada aviso é enviado logo após a ação que o gerou
+   *   (hospedagem serverless, como a Vercel, onde não há processo contínuo).
+   */
+  NOTIFICATION_DISPATCH: z.enum(['interval', 'immediate']).default('interval'),
+  /** Segredo das chamadas agendadas (Vercel Cron) para reenviar a fila. */
+  CRON_SECRET: z.string().min(16).optional(),
 });
 
 export type Env = z.infer<typeof envSchema>;

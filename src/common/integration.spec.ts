@@ -1,4 +1,5 @@
 import { isSuspiciousReuse } from '../modules/auth/auth.service.js';
+import { isCronAuthorized } from '../modules/notifications/cron.controller.js';
 import {
   BFF_SECRET_HEADER,
   CLIENT_IP_HEADER,
@@ -89,5 +90,21 @@ describe('reuso de refresh token', () => {
 
   it('com tolerância zero, qualquer reuso é suspeito', () => {
     expect(isSuspiciousReuse(revokedAt, after(1), 0)).toBe(true);
+  });
+});
+
+describe('rotina agendada (cron)', () => {
+  const secret = 'segredo-do-cron-1234567';
+
+  it('aceita só o Bearer com o segredo exato', () => {
+    expect(isCronAuthorized(`Bearer ${secret}`, secret)).toBe(true);
+    expect(isCronAuthorized(`Bearer ${secret}x`, secret)).toBe(false);
+    expect(isCronAuthorized(secret, secret)).toBe(false);
+    expect(isCronAuthorized(undefined, secret)).toBe(false);
+  });
+
+  it('sem segredo configurado, ninguém entra', () => {
+    expect(isCronAuthorized('Bearer ', undefined)).toBe(false);
+    expect(isCronAuthorized('Bearer qualquer', '')).toBe(false);
   });
 });
