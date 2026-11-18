@@ -1,0 +1,12 @@
+node_modules
+dist
+coverage
+*.tsbuildinfo
+.DS_Store
+
+# Variáveis de ambiente
+.env
+.env.test.local
+
+# Cliente Prisma gerado
+/src/generated/prisma

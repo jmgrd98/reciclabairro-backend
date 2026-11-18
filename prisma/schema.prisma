@@ -1,0 +1,501 @@
+// Modelo de dados do ReciclaBairro.
+// Identificadores em inglês; valores de enum em português, como no documento do projeto.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ───────────────────────────── Enums ─────────────────────────────
+
+enum Role {
+  MORADOR
+  COMERCIANTE
+  GESTOR_COOPERATIVA
+  COLETOR
+  EDUCADOR
+  ADMIN
+}
+
+enum PickupStatus {
+  SOLICITADA
+  EM_ANALISE
+  AGENDADA
+  EM_ROTA
+  CONCLUIDA
+  CANCELADA
+  RECUSADA
+}
+
+enum Period {
+  MANHA
+  TARDE
+  NOITE
+}
+
+enum QuantityUnit {
+  SACOS
+  KG
+  CAIXAS
+  UNIDADES
+}
+
+enum CollectionPointType {
+  ECOPONTO
+  PEV
+  COOPERATIVA
+  COMERCIO
+}
+
+enum MemberRole {
+  GESTOR
+  COLETOR
+}
+
+enum NotificationChannel {
+  IN_APP
+  PUSH
+  EMAIL
+}
+
+enum DeliveryStatus {
+  PENDENTE
+  ENVIADA
+  FALHOU
+}
+
+enum DevicePlatform {
+  IOS
+  ANDROID
+  WEB
+}
+
+// ─────────────────────────── Identidade ───────────────────────────
+
+model User {
+  id            String    @id @default(uuid()) @db.Uuid
+  name          String
+  email         String    @unique
+  phone         String?
+  passwordHash  String
+  role          Role      @default(MORADOR)
+  lgpdConsentAt DateTime
+  active        Boolean   @default(true)
+  deletedAt     DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  refreshTokens       RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
+  addresses           Address[]
+  deviceTokens        DeviceToken[]
+  membership          CooperativeMember?
+  pickupRequests      PickupRequest[]       @relation("Requester")
+  assignedPickups     PickupRequest[]       @relation("Collector")
+  statusChanges       PickupStatusHistory[]
+  notifications       Notification[]
+  guideViews          MaterialGuideView[]
+}
+
+model RefreshToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Address {
+  id           String    @id @default(uuid()) @db.Uuid
+  userId       String    @db.Uuid
+  label        String?
+  zipCode      String
+  street       String
+  number       String
+  complement   String?
+  neighborhood String
+  city         String
+  state        String    @db.Char(2)
+  latitude     Float
+  longitude    Float
+  regionId     String?   @db.Uuid
+  isPrimary    Boolean   @default(false)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  region         Region?         @relation(fields: [regionId], references: [id], onDelete: SetNull)
+  pickupRequests PickupRequest[]
+
+  @@index([userId])
+  @@index([regionId])
+}
+
+model DeviceToken {
+  id        String         @id @default(uuid()) @db.Uuid
+  userId    String         @db.Uuid
+  token     String         @unique
+  platform  DevicePlatform
+  createdAt DateTime       @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// ──────────────────────────── Catálogo ────────────────────────────
+
+/// Região atendida (a "região-polo" do documento). O endereço é associado a uma
+/// região pelo nome do bairro ou, na falta dele, pela distância até o centro.
+model Region {
+  id              String   @id @default(uuid()) @db.Uuid
+  name            String
+  city            String
+  state           String   @db.Char(2)
+  neighborhoods   String[]
+  centerLatitude  Float?
+  centerLongitude Float?
+  radiusKm        Float?
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  addresses          Address[]
+  collectionPoints   CollectionPoint[]
+  schedules          CollectionSchedule[]
+  scheduleExceptions ScheduleException[]
+  cooperatives       CooperativeRegion[]
+  pickupRequests     PickupRequest[]
+
+  @@unique([name, city, state])
+}
+
+model MaterialCategory {
+  id          String   @id @default(uuid()) @db.Uuid
+  name        String   @unique
+  slug        String   @unique
+  color       String?
+  icon        String?
+  description String?
+  createdAt   DateTime @default(now())
+
+  materials        Material[]
+  collectionPoints CollectionPointCategory[]
+  schedules        CollectionSchedule[]
+  requestItems     PickupRequestItem[]
+  collectedItems   PickupCollectedItem[]
+}
+
+model Material {
+  id          String   @id @default(uuid()) @db.Uuid
+  categoryId  String   @db.Uuid
+  name        String
+  recyclable  Boolean
+  /// Como preparar/separar o material antes do descarte.
+  preparation String
+  notes       String?
+  synonyms    String[]
+  /// Nome + sinônimos em minúsculas e sem acentos, para busca.
+  searchText  String
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  category MaterialCategory    @relation(fields: [categoryId], references: [id])
+  views    MaterialGuideView[]
+
+  @@unique([categoryId, name])
+  @@index([categoryId])
+}
+
+/// Cada consulta ao guia; base do indicador "uso do guia de materiais".
+model MaterialGuideView {
+  id         String   @id @default(uuid()) @db.Uuid
+  materialId String   @db.Uuid
+  userId     String?  @db.Uuid
+  viewedAt   DateTime @default(now())
+
+  material Material @relation(fields: [materialId], references: [id], onDelete: Cascade)
+  user     User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([materialId])
+  @@index([viewedAt])
+}
+
+model CollectionPoint {
+  id            String              @id @default(uuid()) @db.Uuid
+  name          String
+  type          CollectionPointType
+  zipCode       String?
+  street        String
+  number        String?
+  neighborhood  String
+  city          String
+  state         String              @db.Char(2)
+  latitude      Float
+  longitude     Float
+  /// Preenchida por trigger a partir de latitude/longitude (ver migration inicial).
+  geo           Unsupported("geography(Point, 4326)")?
+  regionId      String?             @db.Uuid
+  cooperativeId String?             @db.Uuid
+  instructions  String?
+  phone         String?
+  active        Boolean             @default(true)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  region      Region?                   @relation(fields: [regionId], references: [id], onDelete: SetNull)
+  cooperative Cooperative?              @relation(fields: [cooperativeId], references: [id], onDelete: SetNull)
+  categories  CollectionPointCategory[]
+  hours       CollectionPointHours[]
+
+  @@index([geo], type: Gist)
+  @@index([regionId])
+}
+
+model CollectionPointCategory {
+  collectionPointId String @db.Uuid
+  categoryId        String @db.Uuid
+
+  collectionPoint CollectionPoint  @relation(fields: [collectionPointId], references: [id], onDelete: Cascade)
+  category        MaterialCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([collectionPointId, categoryId])
+  @@index([categoryId])
+}
+
+model CollectionPointHours {
+  id                String @id @default(uuid()) @db.Uuid
+  collectionPointId String @db.Uuid
+  /// 0 = domingo … 6 = sábado
+  weekday           Int    @db.SmallInt
+  /// "HH:MM"
+  opensAt           String @db.Char(5)
+  closesAt          String @db.Char(5)
+
+  collectionPoint CollectionPoint @relation(fields: [collectionPointId], references: [id], onDelete: Cascade)
+
+  @@index([collectionPointId])
+}
+
+/// Calendário da coleta seletiva porta a porta, por região.
+model CollectionSchedule {
+  id        String   @id @default(uuid()) @db.Uuid
+  regionId  String   @db.Uuid
+  weekday   Int      @db.SmallInt
+  period    Period
+  notes     String?
+  createdAt DateTime @default(now())
+
+  region     Region             @relation(fields: [regionId], references: [id], onDelete: Cascade)
+  categories MaterialCategory[]
+
+  @@index([regionId])
+}
+
+/// Dias em que a coleta regular não acontece (feriados etc.).
+model ScheduleException {
+  id       String   @id @default(uuid()) @db.Uuid
+  regionId String   @db.Uuid
+  date     DateTime @db.Date
+  reason   String
+
+  region Region @relation(fields: [regionId], references: [id], onDelete: Cascade)
+
+  @@unique([regionId, date])
+}
+
+// ─────────────────────────── Cooperativas ───────────────────────────
+
+model Cooperative {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  cnpj      String?  @unique
+  phone     String?
+  email     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  regions          CooperativeRegion[]
+  members          CooperativeMember[]
+  collectionPoints CollectionPoint[]
+  pickupRequests   PickupRequest[]
+}
+
+model CooperativeRegion {
+  cooperativeId String @db.Uuid
+  regionId      String @db.Uuid
+
+  cooperative Cooperative @relation(fields: [cooperativeId], references: [id], onDelete: Cascade)
+  region      Region      @relation(fields: [regionId], references: [id], onDelete: Cascade)
+
+  @@id([cooperativeId, regionId])
+  @@index([regionId])
+}
+
+model CooperativeMember {
+  id            String     @id @default(uuid()) @db.Uuid
+  cooperativeId String     @db.Uuid
+  userId        String     @unique @db.Uuid
+  role          MemberRole
+  active        Boolean    @default(true)
+  createdAt     DateTime   @default(now())
+
+  cooperative Cooperative @relation(fields: [cooperativeId], references: [id], onDelete: Cascade)
+  user        User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([cooperativeId])
+}
+
+// ─────────────────────────── Solicitações ───────────────────────────
+
+model PickupRequest {
+  id              String       @id @default(uuid()) @db.Uuid
+  sequence        Int          @unique @default(autoincrement())
+  /// Número de protocolo exibido ao usuário: RB-AAAA-NNNNNN
+  protocol        String?      @unique
+  requesterId     String       @db.Uuid
+  addressId       String?      @db.Uuid
+  /// Cópia do endereço no momento do pedido (o endereço do usuário pode mudar depois).
+  addressText     String
+  latitude        Float
+  longitude       Float
+  regionId        String       @db.Uuid
+  cooperativeId   String?      @db.Uuid
+  collectorId     String?      @db.Uuid
+  status          PickupStatus @default(SOLICITADA)
+  preferredDate   DateTime?    @db.Date
+  preferredPeriod Period?
+  scheduledDate   DateTime?    @db.Date
+  scheduledPeriod Period?
+  requesterNotes  String?
+  /// Motivo da recusa ou do cancelamento.
+  closingReason   String?
+  completionNotes String?
+  reviewStartedAt DateTime?
+  confirmedAt     DateTime?
+  completedAt     DateTime?
+  closedAt        DateTime?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  requester      User                  @relation("Requester", fields: [requesterId], references: [id])
+  address        Address?              @relation(fields: [addressId], references: [id], onDelete: SetNull)
+  region         Region                @relation(fields: [regionId], references: [id])
+  cooperative    Cooperative?          @relation(fields: [cooperativeId], references: [id])
+  collector      User?                 @relation("Collector", fields: [collectorId], references: [id])
+  items          PickupRequestItem[]
+  collectedItems PickupCollectedItem[]
+  history        PickupStatusHistory[]
+
+  @@index([requesterId, createdAt])
+  @@index([cooperativeId, status])
+  @@index([regionId, status])
+  @@index([collectorId, scheduledDate])
+}
+
+model PickupRequestItem {
+  id         String       @id @default(uuid()) @db.Uuid
+  requestId  String       @db.Uuid
+  categoryId String       @db.Uuid
+  quantity   Float
+  unit       QuantityUnit
+
+  request  PickupRequest    @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  category MaterialCategory @relation(fields: [categoryId], references: [id])
+
+  @@index([requestId])
+  @@index([categoryId])
+}
+
+/// "Registro de materiais recolhidos", preenchido na conclusão.
+model PickupCollectedItem {
+  id         String       @id @default(uuid()) @db.Uuid
+  requestId  String       @db.Uuid
+  categoryId String       @db.Uuid
+  quantity   Float
+  unit       QuantityUnit
+
+  request  PickupRequest    @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  category MaterialCategory @relation(fields: [categoryId], references: [id])
+
+  @@index([requestId])
+  @@index([categoryId])
+}
+
+/// Linha do tempo do pedido e base dos indicadores.
+model PickupStatusHistory {
+  id         String        @id @default(uuid()) @db.Uuid
+  requestId  String        @db.Uuid
+  fromStatus PickupStatus?
+  toStatus   PickupStatus
+  /// Tipo do evento (CREATED, SCHEDULED, RESCHEDULED, ASSIGNED…).
+  kind       String
+  authorId   String?       @db.Uuid
+  comment    String?
+  createdAt  DateTime      @default(now())
+
+  request PickupRequest @relation(fields: [requestId], references: [id], onDelete: Cascade)
+  author  User?         @relation(fields: [authorId], references: [id], onDelete: SetNull)
+
+  @@index([requestId, createdAt])
+}
+
+// ─────────────────────────── Notificações ───────────────────────────
+
+model Notification {
+  id        String    @id @default(uuid()) @db.Uuid
+  userId    String    @db.Uuid
+  type      String
+  title     String
+  body      String
+  data      Json?
+  readAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user       User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  deliveries NotificationDelivery[]
+
+  @@index([userId, createdAt])
+  @@index([userId, readAt])
+}
+
+/// Fila de envio (outbox) por canal, processada por job agendado.
+model NotificationDelivery {
+  id             String              @id @default(uuid()) @db.Uuid
+  notificationId String              @db.Uuid
+  channel        NotificationChannel
+  status         DeliveryStatus      @default(PENDENTE)
+  attempts       Int                 @default(0)
+  lastError      String?
+  sentAt         DateTime?
+  createdAt      DateTime            @default(now())
+
+  notification Notification @relation(fields: [notificationId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
+  @@index([notificationId])
+}

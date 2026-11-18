@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      db:
+        image: postgis/postgis:17-3.5
+        env:
+          POSTGRES_USER: reciclabairro
+          POSTGRES_PASSWORD: reciclabairro
+          POSTGRES_DB: reciclabairro_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U reciclabairro -d reciclabairro_test"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql://reciclabairro:reciclabairro@localhost:5432/reciclabairro_test?schema=public
+      TEST_DATABASE_URL: postgresql://reciclabairro:reciclabairro@localhost:5432/reciclabairro_test?schema=public
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      - run: npm run test:e2e

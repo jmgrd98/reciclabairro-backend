@@ -1,0 +1,51 @@
+services:
+  db:
+    image: postgis/postgis:17-3.5
+    # A imagem oficial do PostGIS só existe para amd64; em Macs Apple Silicon roda emulada.
+    platform: linux/amd64
+    container_name: reciclabairro-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: reciclabairro
+      POSTGRES_PASSWORD: reciclabairro
+      POSTGRES_DB: reciclabairro
+    ports:
+      # 5432 e 5433 costumam estar ocupadas por outros projetos; usamos 5434 no host.
+      - '5434:5432'
+    volumes:
+      - reciclabairro-db:/var/lib/postgresql/data
+      - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/20-init-test-db.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U reciclabairro -d reciclabairro']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  mailpit:
+    image: axllent/mailpit:latest
+    container_name: reciclabairro-mailpit
+    restart: unless-stopped
+    ports:
+      - '1025:1025' # SMTP
+      - '8025:8025' # caixa de entrada web: http://localhost:8025
+
+  api:
+    profiles: ['api']
+    build: .
+    container_name: reciclabairro-api
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      DATABASE_URL: postgresql://reciclabairro:reciclabairro@db:5432/reciclabairro?schema=public
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-troque-este-segredo-em-producao-0001}
+      SMTP_HOST: mailpit
+      SMTP_PORT: 1025
+      MAIL_FROM: 'ReciclaBairro <nao-responda@reciclabairro.local>'
+    ports:
+      - '3000:3000'
+
+volumes:
+  reciclabairro-db:
