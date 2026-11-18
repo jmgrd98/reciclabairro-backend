@@ -1,7 +1,4 @@
 import { timingSafeEqual } from 'node:crypto';
-import { Inject, Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import { ThrottlerGuard } from '@nestjs/throttler';
 
 export const BFF_SECRET_HEADER = 'x-bff-secret';
 export const CLIENT_IP_HEADER = 'x-client-ip';
@@ -37,20 +34,4 @@ export function resolveTracker(
     return clientIp;
   }
   return connectionIp;
-}
-
-@Injectable()
-export class ClientIpThrottlerGuard extends ThrottlerGuard {
-  @Inject(ConfigService)
-  private readonly config: ConfigService;
-
-  protected getTracker(req: Record<string, any>): Promise<string> {
-    return Promise.resolve(
-      resolveTracker(
-        req.headers ?? {},
-        req.ip ?? 'unknown',
-        this.config.get<string>('BFF_SHARED_SECRET'),
-      ),
-    );
-  }
 }

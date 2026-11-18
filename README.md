@@ -114,7 +114,7 @@ Decisões que o documento do projeto deixava em aberto:
 
 O app web fica em [`reciclabairro-web`](../reciclabairro-web) (Next.js, porta 3001). O navegador não chama esta API direto: tudo passa pelo servidor do Next (BFF), que guarda os tokens em cookies `httpOnly`. Três pontos desta API existem por causa disso:
 
-- **`BFF_SHARED_SECRET`** (mesmo valor nos dois projetos): como todas as chamadas chegam do IP do frontend, o limite de requisições usa o IP do usuário final informado pelo BFF — mas só quando a chamada apresenta esse segredo (`src/common/throttler.guard.ts`). Sem o segredo, vale o IP da conexão.
+- **`BFF_SHARED_SECRET`** (mesmo valor nos dois projetos): como todas as chamadas chegam do IP do frontend, o limite de requisições usa o IP do usuário final informado pelo BFF — mas só quando a chamada apresenta esse segredo (`src/common/throttler.guard.ts` e `src/common/rate-limit.ts`). Sem o segredo, vale o IP da conexão.
 - **`REFRESH_REUSE_GRACE_SECONDS`** (padrão 30): reapresentar um refresh token recém-trocado é tratado como corrida entre requisições (só 401). Depois desse prazo, é tratado como roubo e todas as sessões do usuário caem.
 - **`APP_PUBLIC_URL`**: endereço do frontend, usado no link do e-mail de redefinição de senha (`/redefinir-senha?token=…`).
 

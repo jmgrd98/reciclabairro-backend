@@ -2,9 +2,9 @@ import { timingSafeEqual } from 'node:crypto';
 import { Controller, Get, Headers, HttpCode } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { ApiExcludeController } from '@nestjs/swagger';
-import { SkipThrottle } from '@nestjs/throttler';
 import { AppException } from '../../common/app.exception.js';
 import { Public } from '../../common/auth.js';
+import { SkipRateLimit } from '../../common/rate-limit.js';
 import { NotificationsService } from './notifications.service.js';
 
 /** Confere o "Authorization: Bearer <CRON_SECRET>" sem vazar tempo de comparação. */
@@ -26,7 +26,7 @@ export function isCronAuthorized(
  */
 @ApiExcludeController()
 @Public()
-@SkipThrottle()
+@SkipRateLimit()
 @Controller('internal/cron')
 export class CronController {
   constructor(

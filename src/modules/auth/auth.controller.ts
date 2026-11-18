@@ -1,7 +1,7 @@
 import { Body, Controller, HttpCode, Post } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { Throttle } from '@nestjs/throttler';
 import { Public } from '../../common/auth.js';
+import { RateLimit } from '../../common/rate-limit.js';
 import {
   ForgotPasswordDto,
   LoginDto,
@@ -12,7 +12,7 @@ import {
 import { AuthService } from './auth.service.js';
 
 /** Limite mais rígido nas rotas sensíveis a força bruta. */
-const STRICT = { default: { limit: 10, ttl: 60_000 } };
+const STRICT = { limit: 10, ttl: 60_000 };
 
 @ApiTags('Autenticação')
 @Public()
@@ -21,7 +21,7 @@ export class AuthController {
   constructor(private readonly auth: AuthService) {}
 
   @Post('register')
-  @Throttle(STRICT)
+  @RateLimit(STRICT)
   @ApiOperation({
     summary: 'Cadastra morador ou comerciante e já devolve os tokens',
   })
@@ -31,7 +31,7 @@ export class AuthController {
 
   @Post('login')
   @HttpCode(200)
-  @Throttle(STRICT)
+  @RateLimit(STRICT)
   @ApiOperation({ summary: 'Entra com e-mail e senha' })
   login(@Body() dto: LoginDto) {
     return this.auth.login(dto);
@@ -53,7 +53,7 @@ export class AuthController {
 
   @Post('forgot-password')
   @HttpCode(204)
-  @Throttle(STRICT)
+  @RateLimit(STRICT)
   @ApiOperation({
     summary: 'Envia e-mail com o código de redefinição de senha',
   })
@@ -63,7 +63,7 @@ export class AuthController {
 
   @Post('reset-password')
   @HttpCode(204)
-  @Throttle(STRICT)
+  @RateLimit(STRICT)
   @ApiOperation({
     summary: 'Define nova senha a partir do código recebido por e-mail',
   })

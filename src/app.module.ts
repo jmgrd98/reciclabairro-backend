@@ -3,9 +3,8 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
 import { ScheduleModule } from '@nestjs/schedule';
-import { ThrottlerModule } from '@nestjs/throttler';
 import { JwtAuthGuard, RolesGuard } from './common/guards.js';
-import { ClientIpThrottlerGuard } from './common/throttler.guard.js';
+import { RateLimitGuard } from './common/rate-limit.js';
 import { validateEnv } from './config/env.js';
 import { AuthModule } from './modules/auth/auth.module.js';
 import { CollectionPointsModule } from './modules/collection-points/collection-points.module.js';
@@ -26,11 +25,6 @@ import { PrismaModule } from './prisma/prisma.module.js';
     ConfigModule.forRoot({ isGlobal: true, validate: validateEnv }),
     EventEmitterModule.forRoot(),
     ScheduleModule.forRoot(),
-    ThrottlerModule.forRoot({
-      throttlers: [{ name: 'default', ttl: 60_000, limit: 120 }],
-      // Os testes e2e fazem muitos logins seguidos; o limite só vale fora deles.
-      skipIf: () => process.env.NODE_ENV === 'test',
-    }),
     PrismaModule,
     MailModule,
     AuthModule,
@@ -46,7 +40,7 @@ import { PrismaModule } from './prisma/prisma.module.js';
   ],
   controllers: [HealthController],
   providers: [
-    { provide: APP_GUARD, useClass: ClientIpThrottlerGuard },
+    { provide: APP_GUARD, useClass: RateLimitGuard },
     { provide: APP_GUARD, useClass: JwtAuthGuard },
     { provide: APP_GUARD, useClass: RolesGuard },
   ],

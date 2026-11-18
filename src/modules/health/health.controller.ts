@@ -1,12 +1,12 @@
 import { Controller, Get, ServiceUnavailableException } from '@nestjs/common';
 import { ApiOperation, ApiTags } from '@nestjs/swagger';
-import { SkipThrottle } from '@nestjs/throttler';
 import { Public } from '../../common/auth.js';
+import { SkipRateLimit } from '../../common/rate-limit.js';
 import { PrismaService } from '../../prisma/prisma.service.js';
 
 @ApiTags('Infra')
 @Public()
-@SkipThrottle()
+@SkipRateLimit()
 @Controller('health')
 export class HealthController {
   constructor(private readonly prisma: PrismaService) {}
